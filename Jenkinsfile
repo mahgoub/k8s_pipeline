@@ -1,53 +1,49 @@
-version="1.0.0"
-repository="ikolomiyets/demo-frontend"
-tag="latest"
-image="${repository}:${version}.${env.BUILD_NUMBER}"
-namespace="demo"
+pipeline {
 
-podTemplate(label: 'demo-customer-pod', cloud: 'kubernetes', serviceAccount: 'jenkins',
-  containers: [
-    containerTemplate(name: 'ng', image: 'iktech/angular-client-slave', ttyEnabled: true, command: 'cat'),
-    containerTemplate(name: 'docker', image: 'docker:dind', ttyEnabled: true, command: 'cat', privileged: true,
-        envVars: [secretEnvVar(key: 'DOCKER_USERNAME', secretName: 'docker-hub-credentials', secretKey: 'username'),
-    ]),
-    containerTemplate(name: 'sonarqube', image: 'iktech/sonarqube-scanner', ttyEnabled: true, command: 'cat'),
-    containerTemplate(name: 'kubectl', image: 'roffe/kubectl', ttyEnabled: true, command: 'cat'),
-  ],
-  volumes: [
-    secretVolume(mountPath: '/etc/.ssh', secretName: 'ssh-home'),
-    secretVolume(secretName: 'docker-hub-credentials', mountPath: '/etc/.secret'),
-    hostPathVolume(hostPath: '/var/run/docker.sock', mountPath: '/var/run/docker.sock')
-  ]) {
-    node('demo-customer-pod') {
-        stage('Prepare') {
-            checkout scm
-        }
+  environment {
+    dockerimagename = "thetips4you/nodeapp"
+    dockerImage = ""
+  }
 
-        stage('Build Docker Image') {
-            container('docker') {
-                sh """
-                  docker build -t ${image} .
-                  cat /etc/.secret/password | docker login --password-stdin --username $DOCKER_USERNAME
-                  docker push ${image}
-                  docker tag ${image} ${repository}:${tag}
-                  docker push ${repository}:${tag}
-                """
-                milestone(1)
-            }
-        }
-        stage('Deploy Latest') {
-            container('kubectl') {
-                sh "kubectl patch -n ${namespace} deployment demo-frontend -p '{\"spec\": { \"template\" : {\"spec\" : {\"containers\" : [{ \"name\" : \"demo-frontend\", \"image\" : \"${image}\"}]}}}}'"
-                milestone(2)
-            }
-        }
+  agent any
+
+  stages {
+
+    stage('Checkout Source') {
+      steps {
+        git 'https://github.com/shazforiot/nodeapp_test.git'
+      }
     }
-}
 
-properties([[
-    $class: 'BuildDiscarderProperty',
-    strategy: [
-        $class: 'LogRotator',
-        artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10']
-    ]
-]);
+    stage('Build image') {
+      steps{
+        script {
+          dockerImage = docker.build dockerimagename
+        }
+      }
+    }
+
+    stage('Pushing Image') {
+      environment {
+               registryCredential = 'dockerhublogin'
+           }
+      steps{
+        script {
+          docker.withRegistry( 'https://registry.hub.docker.com', registryCredential ) {
+            dockerImage.push("latest")
+          }
+        }
+      }
+    }
+
+    stage('Deploying App to Kubernetes') {
+      steps {
+        script {
+          kubernetesDeploy(configs: "deploymentservice.yml", kubeconfigId: "kubernetes")
+        }
+      }
+    }
+
+  }
+
+}
