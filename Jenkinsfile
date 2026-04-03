@@ -1,49 +1,25 @@
 pipeline {
-
-  environment {
-    dockerimagename = "thetips4you/nodeapp"
-    dockerImage = ""
-  }
-
   agent any
 
   stages {
-
-    stage('Checkout Source') {
+    stage('Prepare') {
       steps {
-        git 'https://github.com/shazforiot/nodeapp_test.git'
+        sh 'echo "<h1>Hello from Jenkins</h1>" > index.html'
+        sh 'ls -l'
       }
     }
 
-    stage('Build image') {
-      steps{
-        script {
-          dockerImage = docker.build dockerimagename
-        }
-      }
-    }
-
-    stage('Pushing Image') {
-      environment {
-               registryCredential = 'dockerhublogin'
-           }
-      steps{
-        script {
-          docker.withRegistry( 'https://registry.hub.docker.com', registryCredential ) {
-            dockerImage.push("latest")
-          }
-        }
-      }
-    }
-
-    stage('Deploying App to Kubernetes') {
+    stage('Test') {
       steps {
-        script {
-          kubernetesDeploy(configs: "deploymentservice.yml", kubeconfigId: "kubernetes")
-        }
+        sh 'grep Hello index.html'
       }
     }
 
+    stage('Package') {
+      steps {
+        sh 'tar -czf hello-ci.tar.gz index.html'
+        sh 'ls -lh hello-ci.tar.gz'
+      }
+    }
   }
-
 }
